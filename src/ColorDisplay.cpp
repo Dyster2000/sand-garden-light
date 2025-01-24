@@ -31,7 +31,7 @@ ColorDisplay::ColorDisplay(Joystick &joystick, OneButtonTiny &button)
       Serial.println((int)CurrentMode);
     });
 
-  Button.attachDoubleClick([]()
+  Button.attachLongPressStart([]()
     {
       if (CurrentMode == ColorDisplay::Mode::None || CurrentMode == ColorDisplay::Mode::Edit)
         CurrentMode = ColorDisplay::Mode::CycleSlow;
