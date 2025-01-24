@@ -6,7 +6,7 @@ This is the stock HackPack sand garden code with a LED light strip added and joy
 Open with VSCode using PlatformIO.
 
 ## stock code
-The following files are taken directly from the stock code (originally all in main.ino), but split into different files & classes based on purpose. This was done for readability and to more easily add new code needed for light right.
+The following files are taken directly from the stock code (originally all in main.ino), but split into different files & classes based on purpose. This was done for readability and to more easily add new code needed for light ring.
 - GeometryUtils.cpp/h
 - MathUtils.cpp/h
 - Motion.cpp/h
