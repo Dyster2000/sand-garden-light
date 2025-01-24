@@ -1,2 +1,21 @@
 # sand-garden-light
-Sand Garden with LED lights
+Sand Garden with LED light ring.
+
+This is the stock HackPack sand garden code with a LED light strip added and joystick to control the lights.
+
+Open with VSCode using PlatformIO.
+
+The following files are taken directly from the stock code (originally all in main.ino), but split into different files & classes based on purpose:
+GeometryUtils.cpp/h
+MathUtils.cpp/h
+Motion.cpp/h
+Patterns.cpp/h
+Constants.h
+
+The following files are new and created by Jason Blood to handle the LED color ring.
+ColorDisplay.cpp/h
+
+The following started from the stock code, but contain modifications to support the new color ring.
+main.ino
+LedDisplay.cpp/h
+Joystick.cpp/h
