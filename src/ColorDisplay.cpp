@@ -23,18 +23,18 @@ ColorDisplay::ColorDisplay(Joystick &joystick, OneButtonTiny &button)
 {
   Button.attachClick([]()
     {
-      if (CurrentMode != ColorDisplay::Mode::Edit)
-        CurrentMode = ColorDisplay::Mode::Edit;
+      if (CurrentMode != Mode::Edit)
+        CurrentMode = Mode::Edit;
       else
-        CurrentMode = ColorDisplay::Mode::None;
+        CurrentMode = Mode::None;
       Serial.print("Set CurrentMode=");
       Serial.println((int)CurrentMode);
     });
 
   Button.attachLongPressStart([]()
     {
-      if (CurrentMode == ColorDisplay::Mode::None || CurrentMode == ColorDisplay::Mode::Edit)
-        CurrentMode = ColorDisplay::Mode::CycleSlow;
+      if (CurrentMode == Mode::None || CurrentMode == Mode::Edit)
+        CurrentMode = Mode::CycleSlow;
       Serial.print("Set CurrentMode=");
       Serial.println((int)CurrentMode);
     });
@@ -68,6 +68,10 @@ void ColorDisplay::updateColor()
   // Check for cycle mode change
   switch (CurrentMode)
   {
+    case Mode::None:
+      CurrentMode = Mode::CycleSlow;
+      break;
+
     case Mode::CycleSlow:
     case Mode::CycleFast:
     case Mode::ChaseLeft:
