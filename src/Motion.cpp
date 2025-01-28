@@ -45,98 +45,121 @@ You should have received a copy of the GNU General Public License along with San
   #define MOTORR_IN4_PIN   5
 #endif
 
-bool buttonLongPressed = false;
+bool Motion::ButtonLongPressed = false;
   
-Motion::Motion(OneButtonTiny &mainButton, LedDisplay &mainDisplay, bool &patternActive)
-  : button{ mainButton }
-  , display{ mainDisplay }
-  , runPattern{ patternActive }
-  , stepperAngle(4, MOTORA_IN1_PIN, MOTORA_IN3_PIN, MOTORA_IN2_PIN, MOTORA_IN4_PIN)
-  , stepperRadius(4, MOTORR_IN1_PIN, MOTORR_IN3_PIN, MOTORR_IN2_PIN, MOTORR_IN4_PIN)
-  , motorsEnabled{ true }
+Motion::Motion(OneButtonTiny &mainButton, LedDisplay &mainDisplay)
+  : Button{ mainButton }
+  , Display{ mainDisplay }
+  , StepperAngle(4, MOTORA_IN1_PIN, MOTORA_IN3_PIN, MOTORA_IN2_PIN, MOTORA_IN4_PIN)
+  , StepperRadius(4, MOTORR_IN1_PIN, MOTORR_IN3_PIN, MOTORR_IN2_PIN, MOTORR_IN4_PIN)
+  , MotorsEnabled{ false }
+  , CurrentlyMoving{ false }
 {
 }
 
 void Motion::setup()
 {
-  stepperAngle.enableOutputs();     //enable the motor
-  stepperRadius.enableOutputs();
+  //enable the motor
+  enable(true);
 
   //set the maximum speeds and accelerations for the stepper motors.
-  stepperAngle.setMaxSpeed(MAX_SPEED_A_MOTOR);
-  stepperAngle.setAcceleration(5000.0);           // Need high acceleration without losing steps. 
-  stepperRadius.setMaxSpeed(MAX_SPEED_R_MOTOR);
-  stepperRadius.setAcceleration(5000.0);
+  StepperAngle.setMaxSpeed(MAX_SPEED_A_MOTOR);
+  StepperAngle.setAcceleration(5000.0);           // Need high acceleration without losing steps. 
+  StepperRadius.setMaxSpeed(MAX_SPEED_R_MOTOR);
+  StepperRadius.setAcceleration(5000.0);
 
   //crash home the radial axis. This is a blocking function.
   homeRadius();
+
+  //disable the motors until they are needed
+  enable(false);
 }
 
 void Motion::enable(bool enable)
 {
-  if (motorsEnabled == enable)
+  if (MotorsEnabled == enable)
     return; // Already in target state
 
   if (enable)
   {
-    stepperAngle.enableOutputs();     //enable the motor
-    stepperRadius.enableOutputs();
+    StepperAngle.enableOutputs();     //enable the motor
+    StepperRadius.enableOutputs();
   }
   else
   {
-    stepperAngle.disableOutputs();     //enable the motor
-    stepperRadius.disableOutputs();
+    StepperAngle.disableOutputs();     //enable the motor
+    StepperRadius.disableOutputs();
   }
-  motorsEnabled = enable;
+  MotorsEnabled = enable;
+
+  // enable(false) is called whenever we stop drawing. Handle if we were in the middle of a move to update the new current position
+  if (CurrentlyMoving && !MotorsEnabled)
+  {
+    stopMoving();
+  }
 }
 
 void Motion::manualMove(const Positions &joystickValues)
 {
-  Positions targetPositions;
+  if (!CurrentlyMoving)
+  {
+    Positions targetPositions;
 
-  //first check if an angular change is requested by joystick input
-  if (joystickValues.angular < 0)
-  {
-    targetPositions.angular = CurrentPosition.angular - (STEPS_PER_MOTOR_REV / 100);    //add steps to the target position
-  }
-  else if (joystickValues.angular > 0)
-  {
-    targetPositions.angular = CurrentPosition.angular + (STEPS_PER_MOTOR_REV / 100);
-  }
-  else
-  {
-    targetPositions.angular = CurrentPosition.angular;   //otherwise maintain current position
-  }
-  //next check if a radial change is requested by joystick input
-  if (joystickValues.radial < 0)
-  {
-    targetPositions.radial = CurrentPosition.radial - (MAX_R_STEPS / 100);
-  }
-  else if (joystickValues.radial > 0)
-  {
-    targetPositions.radial = CurrentPosition.radial + (MAX_R_STEPS / 100);
-  }
-  else
-  {
-    targetPositions.radial = CurrentPosition.radial;
-  }
+    //first check if an angular change is requested by joystick input
+    if (joystickValues.angular < 0)
+    {
+      targetPositions.angular = CurrentPosition.angular - (STEPS_PER_MOTOR_REV / 100);    //add steps to the target position
+    }
+    else if (joystickValues.angular > 0)
+    {
+      targetPositions.angular = CurrentPosition.angular + (STEPS_PER_MOTOR_REV / 100);
+    }
+    else
+    {
+      targetPositions.angular = CurrentPosition.angular;   //otherwise maintain current position
+    }
+    //next check if a radial change is requested by joystick input
+    if (joystickValues.radial < 0)
+    {
+      targetPositions.radial = CurrentPosition.radial - (MAX_R_STEPS / 100);
+    }
+    else if (joystickValues.radial > 0)
+    {
+      targetPositions.radial = CurrentPosition.radial + (MAX_R_STEPS / 100);
+    }
+    else
+    {
+      targetPositions.radial = CurrentPosition.radial;
+    }
 
-  //finally, take the steps necessary to move both axes to the target position in a coordinated manner and update the current position.
-  CurrentPosition = orchestrateMotion(CurrentPosition, targetPositions);   
+    //finally, take the steps necessary to move both axes to the target position in a coordinated manner and update the current position.
+    orchestrateMotion(targetPositions);
+
+    // Flag that we are moving manually. Will go false once we reach the target
+    CurrentlyMoving = true;
+  }
+  contineMoving();
 }
 
 void Motion::patternMove(PatternFunction patternFunc, bool patternSwitched)
 {
-  //Call the function that will generate the pattern. 
-  //This automatically calls the appropriate function from the patterns[] array.
-  //Pass in the currentPositions as an argument, and the pattern function returns the targetPositions.
-  //Note that the target positions are absolute coordinates: e.g., a pattern might say
-  //to move to (radius, angle) = (1000 steps, 45 degrees (converted to steps)).
-  //There is only one position on the sand tray that corresponds to those coordinates. 
-  auto targetPositions = patternFunc(CurrentPosition, patternSwitched);
+  if (!CurrentlyMoving)
+  {
+    //Call the function that will generate the pattern. 
+    //This automatically calls the appropriate function from the patterns[] array.
+    //Pass in the currentPositions as an argument, and the pattern function returns the targetPositions.
+    //Note that the target positions are absolute coordinates: e.g., a pattern might say
+    //to move to (radius, angle) = (1000 steps, 45 degrees (converted to steps)).
+    //There is only one position on the sand tray that corresponds to those coordinates. 
+    auto targetPositions = patternFunc(CurrentPosition, patternSwitched);
 
-  //finally, take the steps necessary to move both axes to the target position in a coordinated manner and update the current position.
-  CurrentPosition = orchestrateMotion(CurrentPosition, targetPositions);
+    //finally, take the steps necessary to move both axes to the target position in a coordinated manner and update the current position.
+    orchestrateMotion(targetPositions);
+
+    // Flag that we are moving for a pattern. Will go false once we reach the target
+    CurrentlyMoving = true;
+  }
+  contineMoving();
 }
 
 int Motion::calcRadialChange(int angularMoveInSteps, int radialMoveInSteps)
@@ -177,59 +200,73 @@ void Motion::moveToPosition(long angularSteps, long radialSteps)
   }
 
   //set up the moves for each motor
-  stepperAngle.move(angularSteps);       //set up distance the motor will travel in steps. This value can be positive or negative: the sign determines the direction the motor spins.
-  stepperAngle.setSpeed(speedA);         //call this to ensure that the motor moves at constant speed (no accelerations).
-  stepperRadius.move(radialSteps);
-  stepperRadius.setSpeed(speedR);
+  StepperAngle.move(angularSteps);       //set up distance the motor will travel in steps. This value can be positive or negative: the sign determines the direction the motor spins.
+  StepperAngle.setSpeed(speedA);         //call this to ensure that the motor moves at constant speed (no accelerations).
+  StepperRadius.move(radialSteps);
+  StepperRadius.setSpeed(speedR);
+}
 
-  //execute steps at the correct speed as long as a motor still needs to travel, and as long as the run/stop
-  //button has not been pressed. If the runPattern flag is false, this loop will immediately exit,
-  //leaving steps unfinished in the targeted move. There is code in the main loop after the call to moveToPosition()
-  //that deals with this.
-
-  //this is a blocking section. The only thing that can happen here is moving the motors and updatting the button state.
-  //Adding more functionality inside this loop risks losing synchronization of the motors.
-  while (((stepperAngle.distanceToGo() != 0) || (stepperRadius.distanceToGo() != 0)) && runPattern)
-  {     
-    stepperAngle.runSpeedToPosition();                             //constant speed move, unless the target position is reached.
-    stepperRadius.runSpeedToPosition();
-    button.tick();                                                 //This blocking loop can potentially last a long time, so we have to check the button state.
+void Motion::contineMoving()
+{
+  //constant speed move until the target position is reached.
+  if ((StepperAngle.distanceToGo() != 0) || (StepperRadius.distanceToGo() != 0))
+  {
+    StepperAngle.runSpeedToPosition();
+    StepperRadius.runSpeedToPosition();
   }
+  else
+    stopMoving();
+}
+
+void Motion::stopMoving()
+{
+  // Set flag that we reached the target
+  CurrentlyMoving = false;
+
+  //Update the current position.
+  //movement can be stopped before the move is complete by long pressing the joystick button, so we have
+  //to make sure that our position tracking system accounts for that. We also have to use the target positions
+  //to update the current position.
+  RelativeTarget.angular -= StepperAngle.distanceToGo();
+  RelativeTarget.radial -= StepperRadius.distanceToGo();
+  CurrentPosition.angular += RelativeTarget.angular;
+  CurrentPosition.angular = modulus(CurrentPosition.angular, STEPS_PER_A_AXIS_REV); //wrap the anglular position around if it needs it. 
+  CurrentPosition.radial += calcRadialChange(RelativeTarget.angular, RelativeTarget.radial);
 }
 
 void Motion::homeRadius()
 {
-  button.attachLongPressStart([]()
+  Button.attachLongPressStart([]()
     {
-      buttonLongPressed = true;         
+      ButtonLongPressed = true;
     });
 
   Serial.println("[homeRadius] Start homing radius");
-  stepperRadius.move(1.1 * ACTUAL_LEN_R_STEPS);                       //Longer than actual length of axis to ensure that it fully crash homes.
-  stepperRadius.setSpeed(600.0);                                      //move fast without accelerations so that the motor has less torque when it crashes.
-  while (stepperRadius.distanceToGo() != 0 && !buttonLongPressed)
+  StepperRadius.move(1.1 * ACTUAL_LEN_R_STEPS);                       //Longer than actual length of axis to ensure that it fully crash homes.
+  StepperRadius.setSpeed(600.0);                                      //move fast without accelerations so that the motor has less torque when it crashes.
+  while (StepperRadius.distanceToGo() != 0 && !ButtonLongPressed)
   {   //run the R axis toward 0 for the entire length of the axis. Crash homing.
-    stepperRadius.runSpeedToPosition();                               //non-blocking move function. has to be called in while loop.
-    display.homingSequence(false);                                    //display the homing sequence pattern on the LEDs
-    button.tick();                                                    //poll the button to see if it was long pressed
+    StepperRadius.runSpeedToPosition();                               //non-blocking move function. has to be called in while loop.
+    Display.homingSequence(false);                                    //display the homing sequence pattern on the LEDs
+    Button.tick();                                                    //poll the button to see if it was long pressed
   }
   Serial.println("[homeRadius] radius done");
-  buttonLongPressed = false;
-  stepperRadius.stop();
+  ButtonLongPressed = false;
+  StepperRadius.stop();
 
   delay(100);                                                     //brief delay.
   
   Serial.println("[homeRadius] home angle");
-  stepperRadius.move(-1 * (HOMING_BUFFER + RELAXATION_BUFFER));   //move away from 0 to create a soft stop. RELAXATION_BUFFER releases tension in bead chain/flexible structures
-  stepperRadius.runToPosition();                                  //blocking move.
+  StepperRadius.move(-1 * (HOMING_BUFFER + RELAXATION_BUFFER));   //move away from 0 to create a soft stop. RELAXATION_BUFFER releases tension in bead chain/flexible structures
+  StepperRadius.runToPosition();                                  //blocking move.
 
-  stepperRadius.setCurrentPosition(0);                            //set the current positions as 0 steps.
-  stepperAngle.setCurrentPosition(0);                             //The current locations of the motors will be the origins of motion.
+  StepperRadius.setCurrentPosition(0);                            //set the current positions as 0 steps.
+  StepperAngle.setCurrentPosition(0);                             //The current locations of the motors will be the origins of motion.
 
   CurrentPosition.angular = 0;                                   //set the global current position variables to 0.
   CurrentPosition.radial = 0;
   Serial.println("[homeRadius] show done");
-  display.homingSequence(true);                                   //now that homing is done, display the homing complete sequence on the LEDs
+  Display.homingSequence(true);                                   //now that homing is done, display the homing complete sequence on the LEDs
   Serial.println("[homeRadius] finished");
 }
 
@@ -253,11 +290,11 @@ int Motion::calcRadialSteps(int current, int target, int angularOffsetSteps)
   return ((current - target) + angularOffsetSteps);
 }
 
-Positions Motion::orchestrateMotion(Positions currentPositions, Positions targetPositions)
+void Motion::orchestrateMotion(Positions targetPositions)
 {
   //First take care of making sure that the angular values wrap around correctly,
   targetPositions.angular = modulus(targetPositions.angular, STEPS_PER_A_AXIS_REV);                                                 //wrap value around the 360 degree/0 degree transition if needed
-  targetPositions.angular = findShortestPathToPosition(currentPositions.angular, targetPositions.angular, STEPS_PER_A_AXIS_REV);    //Find the shortest path to the new position.
+  targetPositions.angular = findShortestPathToPosition(CurrentPosition.angular, targetPositions.angular, STEPS_PER_A_AXIS_REV);    //Find the shortest path to the new position.
 
   //First make sure the radial position target won't exceed the limits of the radial axis:
   targetPositions.radial = constrain(targetPositions.radial, 0, MAX_R_STEPS);
@@ -265,24 +302,15 @@ Positions Motion::orchestrateMotion(Positions currentPositions, Positions target
   //Update the radial target position based on how much the angular position is going to move.
   //This compensates for the mechanical link between the two axes. This also converts the absolute radial coordinate
   //into a relative coordinate, which stores how many steps the radial motor has to spin. 
-  targetPositions.radial = calcRadialSteps(currentPositions.radial, targetPositions.radial, targetPositions.angular); 
+  targetPositions.radial = calcRadialSteps(CurrentPosition.radial, targetPositions.radial, targetPositions.angular);
 
   //execute the moves. This is a blocking function: it doesn't return until the move is complete.
   //Also note that these positions are relative coordinates. The pattern function generates an 
   //absolute position as the target to move to, and then the lines of code after that calculate
   //how far the motors have to move in steps to get there. moveToPosition() takes those motor 
   //steps as its arguments. So this function just tells the motors how far they have to move.
-  moveToPosition(targetPositions.angular, targetPositions.radial);    
+  moveToPosition(targetPositions.angular, targetPositions.radial);
 
-  //Update the current position.
-  //moveToPosition can be exited before the move is complete by long pressing the joystick button, so we have
-  //to make sure that our position tracking system accounts for that. We also have to use the target positions
-  //to update the current position.
-  targetPositions.angular -= stepperAngle.distanceToGo();
-  targetPositions.radial -= stepperRadius.distanceToGo();
-  currentPositions.angular += targetPositions.angular;
-  currentPositions.angular = modulus(currentPositions.angular, STEPS_PER_A_AXIS_REV); //wrap the anglular position around if it needs it. 
-  currentPositions.radial += calcRadialChange(targetPositions.angular, targetPositions.radial);
-
-  return currentPositions;
+  // Save the relative move so we can adjust the current position when the move is done
+  RelativeTarget = targetPositions;
 }

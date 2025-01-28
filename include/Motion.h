@@ -34,7 +34,7 @@ typedef Positions (*PatternFunction)(Positions, bool);
 class Motion
 {
 public:
-  Motion(OneButtonTiny &mainButton, LedDisplay &mainDisplay, bool &patternActive);
+  Motion(OneButtonTiny &mainButton, LedDisplay &mainDisplay);
 
   void setup();
   void enable(bool enable);
@@ -101,17 +101,14 @@ public:
    * movement compensates for any angular axis movement. It encapsulates the series of steps required to 
    * calculate the necessary movements, execute them, and update the current positions.
    *
-   * @param currentPositions The current position of both the angular and radial axes, represented as a Positions struct.
    * @param targetPositions The desired target position for both the angular and radial axes, represented as a Positions struct.
    * 
-   * @return Positions The updated current positions of both the angular and radial axes after the motion has been executed.
-   *
    * This function wraps the angular target around the 360-degree transition point and calculates the shortest path 
    * to the target. It also ensures that the radial position stays within its limits, compensates for the mechanical 
    * relationship between the axes, and updates the current position after the move. If the move is interrupted (e.g., 
    * by a long joystick press), the current position tracking adjusts accordingly.
    */
-  Positions orchestrateMotion(Positions currentPositions, Positions targetPositions);
+  void orchestrateMotion(Positions targetPositions);
 
 private:
   /**
@@ -133,15 +130,33 @@ private:
    */
   void homeRadius();
 
+  /**
+   * @brief Handles moving and checking when the end is reach.
+   *
+   * This is the "blocking" move function. If a movement is currently underway, this continues moving to the target
+   * but doesn't do a hard block so the main loop can do other things at the same time (like the light ring).
+   */
+  void contineMoving();
+
+  /**
+   * @brief Handles updating the CurrentPosition when movement is done
+   *
+   * Updates the CurrentPosition when we stop moving, either by reaching the target or if movement is canceled early
+   */
+  void stopMoving();
+
 private:
-  OneButtonTiny &button;
-  LedDisplay &display;
-  bool &runPattern;
+  static bool ButtonLongPressed;
+
+  OneButtonTiny &Button;
+  LedDisplay &Display;
 
   //Create two objects, one for each stepper motor.
-  AccelStepper stepperAngle;     //angular axis motor
-  AccelStepper stepperRadius;    //radial axis motor
+  AccelStepper StepperAngle;     //angular axis motor
+  AccelStepper StepperRadius;    //radial axis motor
 
-  Positions CurrentPosition;  //store the current positions of the axes in this
-  bool motorsEnabled;         //used to track if motor drivers are enabled/disabled. initializes to enabled so the homing sequence can run.
+  Positions CurrentPosition;  // store the current positions of the axes in this
+  Positions RelativeTarget;   // How much we are currently moving.
+  bool MotorsEnabled;         // used to track if motor drivers are enabled/disabled. initializes to enabled so the homing sequence can run.
+  bool CurrentlyMoving;       // Track if currently doing a "blocking" pattern move
 };

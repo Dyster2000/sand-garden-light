@@ -67,7 +67,7 @@ These flags are used in that state machine.
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 uint8_t currentPattern = 1;       //default to pattern 1.
-bool runPattern = false;          //this will be the start/stop flag. true means run the selected pattern.
+bool drawingActive = false;       //this will be the start/stop flag. true means drawing is active (manual or pattern).
 bool autoMode = true;             //tracking if we're in automatic or manual mode. Defaults to auto on startup. If you want to start in manual drawing mode, set this to false.
 bool patternSwitched = false;     //used for properly starting patterns from beginning when a new pattern is selected
 uint8_t lastPattern = currentPattern; //used with currentPattern to detect pattern switching and set the patternSwitched flag.
@@ -92,9 +92,9 @@ Joystick joystickColor(COLOR_JOYSTICK_H_PIN, COLOR_JOYSTICK_V_PIN);
 
 // Create Ledclasses for main display & color ring
 LedDisplay displayStrip;
-ColorDisplay colorStrip(joystickColor, buttonColor);
+ColorDisplay colorRing(joystickColor, buttonColor);
 
-Motion motion(buttonMain, displayStrip, runPattern);
+Motion motion(buttonMain, displayStrip);
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /*
@@ -118,15 +118,15 @@ void setup()
   //Single press of button is for starting or stopping the current pattern.
   buttonMain.attachClick([]()
     {       //This is called a lambda function. Basically it's a nameless function that runs when the button is single pressed.
-      runPattern = !runPattern;     //this flips the boolean state of the variable. If it's true, this sets to false, if false set to true.
-      Serial.print("Set runPattern=");
-      Serial.println(runPattern);
+      drawingActive = !drawingActive;     //this flips the boolean state of the variable. If it's true, this sets to false, if false set to true.
+      Serial.print("Set drawingActive=");
+      Serial.println(drawingActive);
     });
 
   Serial.println("Setup displayStrip");
   displayStrip.setup();
-  Serial.println("Setup colorStrip");
-  colorStrip.setup();
+  Serial.println("Setup colorRing");
+  colorRing.setup();
   Serial.println("Setup motion");
   motion.setup();
 }
@@ -145,109 +145,104 @@ void loop()
   buttonMain.tick();
   buttonColor.tick();
 
-  colorStrip.updateColor();
+  // Update colors on the LED color ring
+  colorRing.updateColor();
 
-  //if the runPattern flag is set to true, we need to start updating target positions for the controller. run the appropriate pattern!
-  if (runPattern)
+  if (drawingActive)
   {
-    #pragma region Running
-    //make sure the motors are enabled, since we want to move them
-    motion.enable(true);
-
-    //First we'll check the state machine flags to see if we're in manual drawing mode.
-    if (!autoMode)           //Not in autoMode, which means we're in manual drawing mode
-    {
-      #pragma region ManualMode
-
-      //Use the LEDs to indicate that we are in manual drawing mode
-      displayStrip.setMaxBrightness();
-      displayStrip.indicatePattern(255);             //pattern 255 is used to indicate manual drawing mode on the LEDs
-
-      auto joystickValues = joystickMain.read();          //read joystick values and store them in joystickValues struct
-      motion.manualMove(joystickValues);
-
-      #pragma endregion ManualMode
-    }
-    else //In this case, the state machine flags indicate that we're in automatic pattern mode, not manual mode.
-    {                                        //automatic pattern mode
-      #pragma region AutomaticMode
-      //update the LED pattern display
-      displayStrip.setMaxBrightness();
-      displayStrip.indicatePattern(currentPattern);     
-      
-      //check to see if the pattern has been switched
-      if (currentPattern != lastPattern)
-      {
-        patternSwitched = true;               //set the flag to indicate that the pattern has been changed
-        lastPattern = currentPattern;         //now we can say that the last patten is the current pattern so that this if block will be false until pattern is changed again
-      }
-
-      motion.patternMove(patterns[currentPattern], patternSwitched);
-      patternSwitched = false;    //after we've called the pattern function above, we can reset this flag to false.
-
-      #pragma endregion AutomaticMode
-    }
-    #pragma endregion Running
+    //if the drawingActive flag is set to true, we need to start updating target positions for the controller. run the appropriate pattern!
+    handleDrawingMode();
   }
   else
-  {    //In this case, runPattern is false, which means this is pattern selection mode
-    #pragma region SelectionMode
-
-    //if the motors are enabled, disable them to save power while they don't need to run
-    motion.enable(false);
-
-    //read the joystick state so that it can be used in the following if statements
-    auto joystickValues = joystickMain.read();
-
-    if (!autoMode)                                          //This means we're not in automatic mode, so we are in manual drawing mode.
-    {
-      displayStrip.indicatePattern(255);                         //The value 255 is used to represent manual mode on the LEDs.
-      displayStrip.fadePixels();  //update the brightness of the LEDs to fade them in and out over time
-
-      if (lastJoystickUpdate >= 200 && (joystickValues.angular >= 90 || joystickValues.angular <= -90))
-      {  //the joystick is pushed all the way to the right or left
-        autoMode = true;                                    //switch to automatic mode so that we can do pattern selection
-        lastJoystickUpdate = 0;                             //reset the joystick update timer
-      }
-    }
-    else
-    {                                                //We're in automatic mode, which means it's time to select a pattern.
-      displayStrip.indicatePattern(currentPattern);
-      displayStrip.fadePixels();  
-
-      if (lastJoystickUpdate >= 200 && joystickValues.radial >= 90)
-      {                              //if it's been 200ms since last joystick update and joystick is pushed all the way up
-        currentPattern++;                                                                          //increment pattern number by 1
-        if ((currentPattern == 0) || (currentPattern > sizeof(patterns)/sizeof(patterns[0])))
-        {  //if currentPattern equals 255 or the number of elements in the pattern array
-          currentPattern = 1;                               //this handles wrapping back around to beginning of patterns.
-        }
-        lastJoystickUpdate = 0;                             //reset the timer that tracks the last time the joystick was updated
-      }
-      else if (lastJoystickUpdate >= 200 && joystickValues.radial <= -90)
-      {                      //if it's been 200ms since last update and joystick is pushed all the way down
-        currentPattern--;
-        if (currentPattern == 0)
-        {
-          currentPattern = sizeof(patterns)/sizeof(patterns[0]);   //this handles wrapping up to the top end of the array that holds the patterns
-        }
-        lastJoystickUpdate = 0;
-
-      }
-      else if (lastJoystickUpdate >= 200 && (joystickValues.angular >= 90 || joystickValues.angular <= -90))
-      {  //if the joystick was pushed all the way to the left
-        autoMode = false;                                                                                         //switch to manual mode
-        lastJoystickUpdate = 0;   
-      }   
-    }
-    #pragma endregion SelectionMode
+  {
+    //In this case, drawingActive is false, which means this is pattern selection mode
+    handleSelectionMode();
   }
 }
 
+void handleDrawingMode()
+{
+  //make sure the motors are enabled, since we want to move them
+  motion.enable(true);
 
+  //First we'll check the state machine flags to see if we're in manual drawing mode.
+  if (!autoMode)  //Not in autoMode, which means we're in manual drawing mode
+  {
+    //Use the LEDs to indicate that we are in manual drawing mode
+    displayStrip.setMaxBrightness();
+    displayStrip.indicatePattern(255);             //pattern 255 is used to indicate manual drawing mode on the LEDs
 
+    auto joystickValues = joystickMain.read();          //read joystick values and store them in joystickValues struct
+    motion.manualMove(joystickValues);
+  }
+  else //In this case, the state machine flags indicate that we're in automatic pattern mode, not manual mode.
+  {
+    //update the LED pattern display
+    displayStrip.setMaxBrightness();
+    displayStrip.indicatePattern(currentPattern);     
+      
+    //check to see if the pattern has been switched
+    if (currentPattern != lastPattern)
+    {
+      patternSwitched = true;               //set the flag to indicate that the pattern has been changed
+      lastPattern = currentPattern;         //now we can say that the last patten is the current pattern so that this if block will be false until pattern is changed again
+    }
 
+    motion.patternMove(patterns[currentPattern], patternSwitched);
+    patternSwitched = false;    //after we've called the pattern function above, we can reset this flag to false.
+  }
+}
 
+void handleSelectionMode()
+{
+  //if the motors are enabled, disable them to save power while they don't need to run
+  motion.enable(false);
+
+  //read the joystick state so that it can be used in the following if statements
+  auto joystickValues = joystickMain.read();
+
+  if (!autoMode)                                          //This means we're not in automatic mode, so we are in manual drawing mode.
+  {
+    displayStrip.indicatePattern(255);                         //The value 255 is used to represent manual mode on the LEDs.
+    displayStrip.fadePixels();  //update the brightness of the LEDs to fade them in and out over time
+
+    if (lastJoystickUpdate >= 200 && (joystickValues.angular >= 90 || joystickValues.angular <= -90))
+    {  //the joystick is pushed all the way to the right or left
+      autoMode = true;                                    //switch to automatic mode so that we can do pattern selection
+      lastJoystickUpdate = 0;                             //reset the joystick update timer
+    }
+  }
+  else
+  {                                                //We're in automatic mode, which means it's time to select a pattern.
+    displayStrip.indicatePattern(currentPattern);
+    displayStrip.fadePixels();  
+
+    if (lastJoystickUpdate >= 200 && joystickValues.radial >= 90)
+    {                              //if it's been 200ms since last joystick update and joystick is pushed all the way up
+      currentPattern++;                                                                          //increment pattern number by 1
+      if ((currentPattern == 0) || (currentPattern > sizeof(patterns)/sizeof(patterns[0])))
+      {  //if currentPattern equals 255 or the number of elements in the pattern array
+        currentPattern = 1;                               //this handles wrapping back around to beginning of patterns.
+      }
+      lastJoystickUpdate = 0;                             //reset the timer that tracks the last time the joystick was updated
+    }
+    else if (lastJoystickUpdate >= 200 && joystickValues.radial <= -90)
+    {                      //if it's been 200ms since last update and joystick is pushed all the way down
+      currentPattern--;
+      if (currentPattern == 0)
+      {
+        currentPattern = sizeof(patterns)/sizeof(patterns[0]);   //this handles wrapping up to the top end of the array that holds the patterns
+      }
+      lastJoystickUpdate = 0;
+
+    }
+    else if (lastJoystickUpdate >= 200 && (joystickValues.angular >= 90 || joystickValues.angular <= -90))
+    {  //if the joystick was pushed all the way to the left
+      autoMode = false;                                                                                         //switch to manual mode
+      lastJoystickUpdate = 0;   
+    }   
+  }
+}
 
 
 
